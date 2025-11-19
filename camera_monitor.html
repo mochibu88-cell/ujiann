@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Uji Kamera & Lokasi (Kirim ke Server)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        button { padding: 10px 20px; font-size: 16px; margin: 5px; border: none; border-radius: 5px; cursor: pointer; }
+        .btn-start { background: #4CAF50; color: white; }
+        .btn-stop { background: #f44336; color: white; }
+        .btn-reset { background: #008CBA; color: white; }
+        video { width: 100%; max-width: 600px; border: 2px solid #333; display: block; margin: 10px auto; }
+        #location-info, #camera-info { margin-top: 15px; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+        #status { margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Uji Kamera & Lokasi (Kirim ke Server)</h1>
+        <p>⚠️ <strong>Ini adalah demo edukasi.</strong><br>
+           Anda <strong>harus memberikan izin</strong> untuk mengakses kamera dan lokasi.<br>
+           <strong>Data akan dikirim ke server Anda</strong> jika Anda menyetujui.</p>
+
+        <!-- Uji Lokasi -->
+        <div class="section">
+            <h2>📍 Uji Lokasi</h2>
+            <button class="btn-start" onclick="getLocation()">Dapatkan Lokasi Saya</button>
+            <button class="btn-reset" onclick="resetLocation()">Reset</button>
+            <div id="location-info">Lokasi belum diambil...</div>
+        </div>
+
+        <!-- Uji Kamera -->
+        <div class="section">
+            <h2>📷 Uji Kamera</h2>
+            <button class="btn-start" onclick="startCamera()">Mulai Rekam</button>
+            <button class="btn-stop" onclick="stopCamera()">Stop Rekam</button>
+            <button class="btn-reset" onclick="resetCamera()">Reset</button>
+            <video id="video" autoplay playsinline style="display: none;"></video>
+            <div id="camera-info">Kamera belum diaktifkan.</div>
+        </div>
+
+        <!-- Status Umum -->
+        <div id="status"></div>
+    </div>
+
+    <script>
+        let locationWatch = null;
+        let cameraStream = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+
+        // === Fungsi Lokasi (Kirim ke Server) ===
+        function getLocation() {
+            const info = document.getElementById("location-info");
+            const status = document.getElementById("status");
+
+            if (!navigator.geolocation) {
+                info.innerHTML = "❌ Browser Anda tidak mendukung geolokasi.";
+                return;
+            }
+
+            info.innerHTML = "🔍 Mencoba mendapatkan lokasi...";
+            status.innerText = "Menunggu izin lokasi...";
+
+            navigator.geolocation.getCurrentPosition(
+                position => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    const acc = position.coords.accuracy;
+
+                    document.getElementById("location-info").innerHTML = `
+                        <strong>✅ Lokasi Ditemukan:</strong><br>
+                        Latitude: ${lat}<br>
+                        Longitude: ${lon}<br>
+                        Akurasi: ±${acc} meter<br>
+                        <small>ℹ️ Data lokasi dikirim ke server...</small>
+                    `;
+                    document.getElementById("status").innerText = "✅ Lokasi berhasil diambil dan dikirim.";
+
+                    // Kirim data lokasi ke server
+                    fetch('http://localhost:5000/location', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ latitude: lat, longitude: lon, accuracy: acc })
+                    })
+                    .then(res => res.text())
+                    .then(data => console.log("Lokasi dikirim:", data))
+                    .catch(err => console.error("Gagal kirim lokasi:", err));
+                },
+                showError,
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000,
+                    maximumAge: 0
+                }
+            );
+        }
+
+        function showError(error) {
+            const info = document.getElementById("location-info");
+            const status = document.getElementById("status");
+
+            switch(error.code) {
+                case error.PERMISSION_DENIED:
+                    info.innerHTML = "❌ Anda menolak akses lokasi.";
+                    status.innerText = "❌ Akses lokasi ditolak.";
+                    break;
+                case error.POSITION_UNAVAILABLE:
+                    info.innerHTML = "❌ Informasi lokasi tidak tersedia.";
+                    status.innerText = "❌ Lokasi tidak tersedia.";
+                    break;
+                case error.TIMEOUT:
+                    info.innerHTML = "❌ Permintaan lokasi timeout.";
+                    status.innerText = "❌ Timeout mendapatkan lokasi.";
+                    break;
+                default:
+                    info.innerHTML = "❌ Terjadi kesalahan tidak dikenal.";
+                    status.innerText = "❌ Kesalahan tidak dikenal.";
+                    break;
+            }
+        }
+
+        function resetLocation() {
+            document.getElementById("location-info").innerText = "Lokasi belum diambil...";
+            document.getElementById("status").innerText = "";
+        }
+
+        // === Fungsi Kamera (Rekam & Kirim ke Server) ===
+        function startCamera() {
+            const video = document.getElementById('video');
+            const info = document.getElementById("camera-info");
+            const status = document.getElementById("status");
+
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                info.innerHTML = "❌ Browser Anda tidak mendukung akses kamera.";
+                return;
+            }
+
+            info.innerText = "🔍 Mencoba mengakses kamera...";
+            status.innerText = "Menunggu izin kamera...";
+
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then(stream => {
+                    cameraStream = stream;
+                    video.srcObject = stream;
+                    video.style.display = "block";
+                    info.innerHTML = "✅ Kamera aktif. Rekaman dimulai...";
+                    status.innerText = "✅ Kamera sedang aktif dan direkam.";
+
+                    // Mulai merekam
+                    mediaRecorder = new MediaRecorder(stream);
+                    recordedChunks = [];
+                    mediaRecorder.ondataavailable = e => {
+                        if (e.data.size > 0) {
+                            recordedChunks.push(e.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(recordedChunks, { type: 'video/webm' });
+                        const formData = new FormData();
+                        formData.append('video', blob, 'rekaman.webm');
+
+                        // Kirim video ke server
+                        fetch('http://localhost:5000/upload', {
+                            method: 'POST',
+                            body: formData
+                        })
+                        .then(res => res.text())
+                        .then(data => console.log("Video dikirim:", data))
+                        .catch(err => console.error("Gagal kirim video:", err));
+                    };
+
+                    mediaRecorder.start();
+                })
+                .catch(err => {
+                    info.innerHTML = `❌ Gagal mengakses kamera:<br>${err.message}`;
+                    status.innerText = "❌ Gagal mengakses kamera.";
+                });
+        }
+
+        function stopCamera() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                cameraStream.getTracks().forEach(track => track.stop());
+                document.getElementById("video").style.display = "none";
+                document.getElementById("camera-info").innerText = "❌ Kamera dihentikan.";
+                document.getElementById("status").innerText = "❌ Kamera dihentikan. Video dikirim ke server.";
+            } else {
+                document.getElementById("camera-info").innerText = "❌ Tidak ada rekaman aktif.";
+            }
+        }
+
+        function resetCamera() {
+            stopCamera();
+            document.getElementById("camera-info").innerText = "Kamera belum diaktifkan.";
+        }
+    </script>
+</body>
+</html>
